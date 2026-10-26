@@ -17,11 +17,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pipelinePaths, readRecords, writeText } from './corpus-io.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const { input: ROOT, output: OUTPUT } = pipelinePaths(path.resolve(__dirname, '..'));
 const SOURCES_DIR = path.join(ROOT, 'sources');
-const CATEGORIES_DIR = path.join(ROOT, 'categories');
+const CATEGORIES_DIR = path.join(OUTPUT, 'categories');
 
 // ---------- category rules ---------------------------------
 // Order is canonical (slug). Each rule has a list of weighted
@@ -307,10 +308,7 @@ const sourceFiles = fs.readdirSync(SOURCES_DIR).filter((d) => fs.statSync(path.j
 for (const src of sourceFiles) {
   const f = path.join(SOURCES_DIR, src, 'raw.jsonl');
   if (!fs.existsSync(f)) continue;
-  const lines = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean);
-  for (const line of lines) {
-    try { allItems.push(JSON.parse(line)); } catch { /* skip */ }
-  }
+  allItems.push(...readRecords(f));
 }
 console.log(`[classify] ${allItems.length} items across ${sourceFiles.length} sources`);
 
@@ -359,15 +357,15 @@ for (const slug of allCategories) {
   fs.mkdirSync(dir, { recursive: true });
   const items = buckets.get(slug) || [];
   const out = items.map((i) => JSON.stringify(i)).join('\n') + (items.length ? '\n' : '');
-  fs.writeFileSync(path.join(dir, 'pointers.jsonl'), out);
+  writeText(path.join(dir, 'pointers.jsonl'), out);
 }
 
 // Write enriched master JSONL (the source files plus classifier output)
-const enrichedDir = path.join(ROOT, 'sources');
+const enrichedDir = path.join(OUTPUT, 'sources');
 for (const src of sourceFiles) {
   const items = allItems.filter((i) => i.source === src);
   if (!items.length) continue;
-  fs.writeFileSync(
+  writeText(
     path.join(enrichedDir, src, 'enriched.jsonl'),
     items.map((i) => JSON.stringify(i)).join('\n') + '\n'
   );

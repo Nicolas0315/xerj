@@ -14,11 +14,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pipelinePaths, readRecords, writeText } from './corpus-io.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const { input: ROOT, output: OUTPUT } = pipelinePaths(path.resolve(__dirname, '..'));
 const SOURCES_DIR = path.join(ROOT, 'sources');
-const CATEGORIES_DIR = path.join(ROOT, 'categories');
+const CATEGORIES_DIR = path.join(OUTPUT, 'categories');
 
 const SOURCES = fs.readdirSync(SOURCES_DIR).filter((d) => fs.statSync(path.join(SOURCES_DIR, d)).isDirectory());
 
@@ -28,11 +29,9 @@ const bySource = {};
 for (const src of SOURCES) {
   const f = path.join(SOURCES_DIR, src, 'enriched.jsonl');
   if (!fs.existsSync(f)) continue;
-  const lines = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean);
-  bySource[src] = 0;
-  for (const line of lines) {
-    try { const o = JSON.parse(line); items.push(o); bySource[src]++; } catch {}
-  }
+  const sourceItems = readRecords(f);
+  bySource[src] = sourceItems.length;
+  items.push(...sourceItems);
 }
 console.log('[stats]', items.length, 'enriched items across', Object.keys(bySource).length, 'sources');
 
@@ -109,7 +108,7 @@ lines.push('```');
 lines.push('');
 lines.push('See `SCHEMA.md` and `TAXONOMY.md` for definitions.');
 
-fs.writeFileSync(path.join(ROOT, 'INDEX.md'), lines.join('\n'));
+writeText(path.join(OUTPUT, 'INDEX.md'), lines.join('\n'));
 console.log('[stats] wrote INDEX.md');
 
 // ---------- per-category README.md -----------------------
@@ -154,6 +153,6 @@ for (const cat of allCategories) {
     for (const [t, n] of topTags) md.push(`| \`${t}\` | ${n} |`);
   }
 
-  fs.writeFileSync(path.join(dir, 'README.md'), md.join('\n') + '\n');
+  writeText(path.join(dir, 'README.md'), md.join('\n') + '\n');
 }
 console.log('[stats] wrote', allCategories.length, 'category READMEs');
