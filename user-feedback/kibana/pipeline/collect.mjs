@@ -17,12 +17,13 @@
 //                              [--pages N]
 // ============================================================
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pipelinePaths, writeBatch, safeFailure } from './corpus-io.mjs';
+export { writeBatch } from './corpus-io.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const { output: ROOT } = pipelinePaths(path.resolve(__dirname, '..'));
 const SOURCES = {
   hackernews:    path.join(ROOT, 'sources/hackernews/raw.jsonl'),
   reddit:        path.join(ROOT, 'sources/reddit/raw.jsonl'),
@@ -59,36 +60,6 @@ function sniffVersions(text) {
   return Array.from(new Set(m)).slice(0, 4);
 }
 
-// Append a batch of already-normalized items to a JSONL file.
-// Dedupe by id against what already exists on disk.
-function writeBatch(filePath, items) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const seen = new Set();
-  if (fs.existsSync(filePath)) {
-    const existing = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
-    const kept = [];
-    for (const line of existing) {
-      try {
-        const obj = JSON.parse(line);
-        if (!seen.has(obj.id)) { seen.add(obj.id); kept.push(line); }
-      } catch { /* skip corrupt */ }
-    }
-    fs.writeFileSync(filePath, kept.join('\n') + (kept.length ? '\n' : ''));
-  }
-  // Open for append-only, write new items that aren't already in the file.
-  const fd = fs.openSync(filePath, 'a');
-  let added = 0, replaced = 0;
-  for (const item of items) {
-    if (!item || !item.id) continue;
-    if (seen.has(item.id)) { replaced++; continue; }
-    fs.writeSync(fd, JSON.stringify(item) + '\n');
-    seen.add(item.id);
-    added++;
-  }
-  fs.closeSync(fd);
-  return { added, replaced };
-}
-
 async function getJson(url, { headers = {}, timeout = 20000 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
@@ -97,7 +68,7 @@ async function getJson(url, { headers = {}, timeout = 20000 } = {}) {
       headers: { 'user-agent': 'xerj-feedback-collector/1.0', ...headers },
       signal: ctrl.signal,
     });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} · ${url}`);
+    if (!res.ok) throw Object.assign(new Error('http-response'), { status: res.status });
     return await res.json();
   } finally {
     clearTimeout(t);
@@ -176,7 +147,7 @@ async function collectHackerNews() {
         }
         if (hits.length < 1000) break; // no more pages for this query
       } catch (e) {
-        console.log('[HN] page error', page, e.message);
+        console.log('[HN] page error', page, safeFailure(e));
         break;
       }
       await sleep(250);
@@ -242,7 +213,7 @@ async function collectReddit() {
         after = j?.data?.after || '';
         if (!after) break;
       } catch (e) {
-        console.log('[reddit] error', e.message);
+        console.log('[reddit] error', safeFailure(e));
         break;
       }
       await sleep(800); // reddit is sensitive
@@ -298,7 +269,7 @@ async function collectStackOverflow() {
         }
         if (j?.has_more === false) break;
       } catch (e) {
-        console.log('[so] page error', page, e.message);
+        console.log('[so] page error', page, safeFailure(e));
         break;
       }
       await sleep(500);
@@ -370,12 +341,12 @@ async function collectGithub() {
           pulled++;
         }
       } catch (e) {
-        console.log(`[github ${r.repo}] page ${page} error`, e.message);
-        if (/403/.test(e.message)) {
+        console.log(`[github ${r.repo}] page ${page} error`, safeFailure(e));
+        if (e.status === 403) {
           console.log(`[github ${r.repo}] rate-limited — stopping this repo`);
           break;
         }
-        if (/422/.test(e.message)) {
+        if (e.status === 422) {
           // GitHub caps the Issues list at 10K results (page 100). Stop.
           console.log(`[github ${r.repo}] hit 10K-result cap at page ${page} — moving on`);
           break;
@@ -459,7 +430,7 @@ async function collectDiscourse() {
         }
         if (posts.length < 10) break; // exhausted
       } catch (e) {
-        console.log('[discourse] error', e.message);
+        console.log('[discourse] error', safeFailure(e));
         break;
       }
       await sleep(400);
@@ -473,14 +444,15 @@ async function collectDiscourse() {
 // ============================================================
 // Driver
 // ============================================================
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 const start = Date.now();
 const want = (src) => wanted.includes('all') || wanted.includes(src);
 const results = {};
-if (want('hn'))        results.hackernews    = await collectHackerNews().catch((e) => { console.log('HN failed', e); return 0; });
-if (want('reddit'))    results.reddit        = await collectReddit().catch((e) => { console.log('Reddit failed', e); return 0; });
-if (want('so'))        results.stackoverflow = await collectStackOverflow().catch((e) => { console.log('SO failed', e); return 0; });
-if (want('github'))    results.github        = await collectGithub().catch((e) => { console.log('GH failed', e); return 0; });
-if (want('discourse')) results.discourse     = await collectDiscourse().catch((e) => { console.log('Discourse failed', e); return 0; });
+if (want('hn'))        results.hackernews    = await collectHackerNews().catch((e) => { console.error('HN failed', safeFailure(e)); process.exitCode = 1; return 0; });
+if (want('reddit'))    results.reddit        = await collectReddit().catch((e) => { console.error('Reddit failed', safeFailure(e)); process.exitCode = 1; return 0; });
+if (want('so'))        results.stackoverflow = await collectStackOverflow().catch((e) => { console.error('SO failed', safeFailure(e)); process.exitCode = 1; return 0; });
+if (want('github'))    results.github        = await collectGithub().catch((e) => { console.error('GH failed', safeFailure(e)); process.exitCode = 1; return 0; });
+if (want('discourse')) results.discourse     = await collectDiscourse().catch((e) => { console.error('Discourse failed', safeFailure(e)); process.exitCode = 1; return 0; });
 
 const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 console.log('---');
@@ -488,3 +460,5 @@ console.log('DONE in', elapsed, 's');
 for (const [k, v] of Object.entries(results)) console.log('  ', k.padEnd(16), v);
 const grandTotal = Object.values(results).reduce((a, b) => a + b, 0);
 console.log('  TOTAL raw hits (with dups):', grandTotal);
+
+}

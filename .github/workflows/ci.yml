@@ -515,6 +515,9 @@ jobs:
       - name: THE MAP pipeline contract
         run: node --test xerj-ux/test/*.test.mjs
 
+      - name: Public research corpus admission (offline synthetic fixtures)
+        run: node --test user-feedback/kibana/pipeline/*.test.mjs
+
   # The harnesses under demo/usecases/ are the only executable proof that the
   # shipped use cases still work — the brain HTTP surface, the MCP tool surface
   # an agent actually sees, and autoindex's zero-config discovery. Every one of

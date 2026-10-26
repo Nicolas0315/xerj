@@ -63,6 +63,69 @@ kibana/
 
 Zero dependencies. Pure Node 22 ESM, only built-in `fetch`.
 
+### Credential admission and private exports
+
+Public posts can contain working credentials. Collection and every classification
+or projection reader pass each parsed JSONL record through `pipeline/corpus-io.mjs`.
+The bounded policy removes credential assignments, generated password/service-token
+logs, authentication arguments/headers, credential URL components, JWT-shaped
+tokens and private-key blocks. It inspects common HTML entities and embedded JSON
+escapes and removes repeated long detected values within the same record.
+`REDACTED` marks removed text; IDs, ordinary provenance, scores and unrelated text
+are retained. Defaults and examples in credential contexts are treated consistently
+with other values; a public source is not proof of invalidity.
+
+This is not universal secret detection. Bare unlabelled values, unknown formats,
+arbitrary encodings and short values repeated outside a credential context can
+escape this policy. It does not determine current validity or revoke credentials.
+Detected structured/YAML-block values, ambiguous quoted concatenation, malformed
+URL-key encodings and malformed JSONL fail admission before any output file is
+replaced. Diagnostics contain fixed categories and line numbers, never excerpts.
+On refusal, review the reported location privately, replace the credential-bearing
+value/context in a private input copy, and rerun the check. Do not paste the
+original line into logs, issues, tests or a public diff.
+
+Inspect an existing corpus without rewriting it (exit `0`: no detected changes;
+`2`: redaction needed; `1`: refusal/error):
+
+```bash
+node pipeline/sanitize.mjs --check
+```
+
+Export raw and enriched records into a **new** directory below a private parent.
+The command preflights every input, writes only sanitized bytes into a private
+staging tree, then renames that complete tree into place. An existing destination
+or in-place export is refused; the original corpus remains untouched.
+
+```bash
+private_parent=$(mktemp -d)
+node pipeline/sanitize.mjs --output-root "$private_parent/corpus"
+node pipeline/sanitize.mjs --input-root "$private_parent/corpus" --check
+node pipeline/classify.mjs --input-root "$private_parent/corpus" --output-root "$private_parent/corpus"
+node pipeline/stats.mjs --input-root "$private_parent/corpus" --output-root "$private_parent/corpus"
+node pipeline/themes.mjs --input-root "$private_parent/corpus" --output-root "$private_parent/corpus"
+node pipeline/design-inputs.mjs --input-root "$private_parent/corpus" --output-root "$private_parent/corpus"
+```
+
+Normal pipeline writes replace each output file atomically after record admission;
+they are not a transaction across every projection. First-ID-wins collection
+deduplication is unchanged, including when the incoming record has changed.
+Only explicitly running collection rewrites its existing raw output through the
+guard; readers sanitize in memory and do not rewrite their input files.
+
+The legacy default frontend-module destination remains `web/src/data/`; an
+explicit `--output-root` puts that module under `<output-root>/web/src/data/`.
+This command does not refresh the independently checked-in `xerj-ux/` and
+`landing/playground/` copies or bundle. Existing corpus copies, generated assets
+and Git history require a separate owner-approved remediation strategy. Removing
+old credential lines in a public patch would publish them again in its diff.
+
+Run the offline regression tests with:
+
+```bash
+node --test pipeline/*.test.mjs
+```
+
 ```bash
 cd user-feedback/kibana
 

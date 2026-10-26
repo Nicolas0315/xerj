@@ -12,21 +12,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pipelinePaths, readRecords, writeText } from './corpus-io.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const { input: ROOT, output: OUTPUT } = pipelinePaths(path.resolve(__dirname, '..'));
 const SOURCES_DIR = path.join(ROOT, 'sources');
-const THEMES_DIR = path.join(ROOT, 'themes');
-fs.mkdirSync(THEMES_DIR, { recursive: true });
+const THEMES_DIR = path.join(OUTPUT, 'themes');
 
 const items = [];
 for (const src of fs.readdirSync(SOURCES_DIR)) {
   const f = path.join(SOURCES_DIR, src, 'enriched.jsonl');
   if (!fs.existsSync(f)) continue;
-  for (const line of fs.readFileSync(f, 'utf8').split('\n').filter(Boolean)) {
-    try { items.push(JSON.parse(line)); } catch {}
-  }
+  items.push(...readRecords(f));
 }
+fs.mkdirSync(THEMES_DIR, { recursive: true });
 
 const trim = (s, n) => {
   s = String(s || '').replace(/\s+/g, ' ').trim();
@@ -65,7 +64,7 @@ for (const [cat, list] of cats) {
   }
   md.push('');
 }
-fs.writeFileSync(path.join(THEMES_DIR, 'top-pains.md'), md.join('\n'));
+writeText(path.join(THEMES_DIR, 'top-pains.md'), md.join('\n'));
 console.log('[themes] wrote top-pains.md');
 
 // ---------- top asks (feature requests) ------------------
@@ -82,7 +81,7 @@ for (const it of asks.slice(0, 50)) {
   const t = trim((it.title || '').replace(/\|/g, '\\|'), 100);
   askMd.push(`| ${it.score || 0} | ${it.comments || 0} | ${t} | [↗](${it.source_url}) |`);
 }
-fs.writeFileSync(path.join(THEMES_DIR, 'top-asks.md'), askMd.join('\n') + '\n');
+writeText(path.join(THEMES_DIR, 'top-asks.md'), askMd.join('\n') + '\n');
 console.log('[themes] wrote top-asks.md');
 
 // ---------- cross-source clusters: items that share keywords across all sources ----
@@ -115,5 +114,5 @@ for (const [name, list] of Object.entries(clusters)) {
   }
   cmd.push('');
 }
-fs.writeFileSync(path.join(THEMES_DIR, 'cross-source-clusters.md'), cmd.join('\n'));
+writeText(path.join(THEMES_DIR, 'cross-source-clusters.md'), cmd.join('\n'));
 console.log('[themes] wrote cross-source-clusters.md');
